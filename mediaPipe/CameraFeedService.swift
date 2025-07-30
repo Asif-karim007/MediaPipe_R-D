@@ -36,12 +36,17 @@ class CameraFeedService: NSObject {
   private let session: AVCaptureSession = AVCaptureSession()
   private lazy var videoPreviewLayer = AVCaptureVideoPreviewLayer(session: session)
   private let sessionQueue = DispatchQueue(label: "com.google.mediapipe.CameraFeedService.sessionQueue")
-  private let cameraPosition: AVCaptureDevice.Position = .front
+
+  // Support switching camera
+  private var cameraPosition: AVCaptureDevice.Position = .front
+  var currentCameraPosition: AVCaptureDevice.Position { cameraPosition }
 
   private var cameraConfigurationStatus: CameraConfigurationStatus = .failed
   private lazy var videoDataOutput = AVCaptureVideoDataOutput()
   private var isSessionRunning = false
   private var imageBufferSize: CGSize?
+
+  private var videoDeviceInput: AVCaptureDeviceInput?
 
   weak var delegate: CameraFeedServiceDelegate?
 
@@ -148,10 +153,20 @@ class CameraFeedService: NSObject {
     guard cameraConfigurationStatus == .success else { return }
     session.beginConfiguration()
 
+    // Remove existing input if present (important for switching)
+    if let input = videoDeviceInput {
+      session.removeInput(input)
+    }
+
     guard addVideoDeviceInput() else {
       session.commitConfiguration()
       cameraConfigurationStatus = .failed
       return
+    }
+
+    // Remove and re-add output to avoid duplication on switch
+    if session.outputs.contains(videoDataOutput) {
+      session.removeOutput(videoDataOutput)
     }
 
     guard addVideoDataOutput() else {
@@ -170,9 +185,10 @@ class CameraFeedService: NSObject {
     }
 
     do {
-      let videoDeviceInput = try AVCaptureDeviceInput(device: camera)
-      if session.canAddInput(videoDeviceInput) {
-        session.addInput(videoDeviceInput)
+      let newVideoDeviceInput = try AVCaptureDeviceInput(device: camera)
+      if session.canAddInput(newVideoDeviceInput) {
+        session.addInput(newVideoDeviceInput)
+        videoDeviceInput = newVideoDeviceInput
 
         let dimensions = CMVideoFormatDescriptionGetDimensions(camera.activeFormat.formatDescription)
         imageBufferSize = CGSize(width: CGFloat(dimensions.width), height: CGFloat(dimensions.height))
@@ -181,7 +197,8 @@ class CameraFeedService: NSObject {
       }
       return false
     } catch {
-      fatalError("Cannot create video device input")
+      print("Cannot create video device input:", error)
+      return false
     }
   }
 
@@ -241,6 +258,29 @@ class CameraFeedService: NSObject {
           self.delegate?.didEncounterSessionRuntimeError()
         }
       }
+    }
+  }
+
+  // MARK: - Camera Switching
+
+  func switchCamera(completion: (() -> Void)? = nil) {
+    sessionQueue.async {
+      self.cameraPosition = (self.cameraPosition == .back) ? .front : .back
+      self.configureSession()
+      DispatchQueue.main.async {
+        completion?()
+      }
+    }
+  }
+
+  // MARK: - Resolution Selection
+
+  func setSessionPreset(_ preset: AVCaptureSession.Preset) {
+    sessionQueue.async {
+      guard self.session.canSetSessionPreset(preset) else { return }
+      self.session.beginConfiguration()
+      self.session.sessionPreset = preset
+      self.session.commitConfiguration()
     }
   }
 }

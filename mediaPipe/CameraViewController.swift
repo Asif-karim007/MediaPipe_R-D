@@ -1,5 +1,3 @@
-// CameraViewController.swift
-
 import UIKit
 import AVFoundation
 import MediaPipeTasksVision
@@ -10,6 +8,8 @@ class CameraViewController: UIViewController {
     private let overlayView = OverlayView()
     private let cameraUnavailableLabel = UILabel()
     private let resumeButton = UIButton(type: .system)
+    private let flipCameraButton = UIButton(type: .system)
+    private let resolutionButton = UIButton(type: .system)
 
     private var isSessionRunning = false
     private var isObserving = false
@@ -24,6 +24,29 @@ class CameraViewController: UIViewController {
         set { poseLandmarkerServiceQueue.async(flags: .barrier) { self._poseLandmarkerService = newValue } }
     }
 
+    // Camera resolutions available for selection
+    private let availablePresets: [AVCaptureSession.Preset] = [
+        .hd4K3840x2160,
+        .hd1920x1080,
+        .hd1280x720,
+        .vga640x480,
+        .cif352x288,
+        .low
+    ]
+    private var presetNames: [String] {
+        return availablePresets.map { preset in
+            switch preset {
+            case .hd4K3840x2160: return "4K"
+            case .hd1920x1080:   return "1080p"
+            case .hd1280x720:    return "720p"
+            case .vga640x480:    return "VGA"
+            case .cif352x288:    return "CIF"
+            case .low:           return "Low"
+            default:             return "Other"
+            }
+        }
+    }
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
@@ -31,7 +54,6 @@ class CameraViewController: UIViewController {
         setupViews()
         cameraFeedService.delegate = self
         print(">>> Resolution:", cameraFeedService.videoResolution)
-        // ⚠️ Don't size the preview layer here – wait until layout
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -52,15 +74,30 @@ class CameraViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-
         // Layout full‑screen preview + overlay
         previewView.frame = view.bounds
         overlayView.frame = view.bounds
-
         // Position labels/buttons
         let frame = view.bounds
         cameraUnavailableLabel.frame = CGRect(x: 0, y: 60, width: frame.width, height: 40)
         resumeButton.frame = CGRect(x: 20, y: frame.height - 80, width: 120, height: 44)
+
+        // Flip camera button (top right)
+        let buttonWidth: CGFloat = 120
+        let buttonHeight: CGFloat = 44
+        flipCameraButton.frame = CGRect(
+            x: view.bounds.width - buttonWidth - 20,
+            y: 50,
+            width: buttonWidth,
+            height: buttonHeight
+        )
+        // Resolution button (below flip)
+        resolutionButton.frame = CGRect(
+            x: view.bounds.width - buttonWidth - 20,
+            y: flipCameraButton.frame.maxY + 10,
+            width: buttonWidth,
+            height: buttonHeight
+        )
 
         // Now size the preview layer to exactly match the previewView
         cameraFeedService.updateVideoPreviewLayer(toFrame: previewView.bounds)
@@ -100,6 +137,22 @@ class CameraViewController: UIViewController {
         resumeButton.isHidden = true
         resumeButton.addTarget(self, action: #selector(onClickResume(_:)), for: .touchUpInside)
         view.addSubview(resumeButton)
+
+        // Flip Camera button
+        flipCameraButton.setTitle("Flip Camera", for: .normal)
+        flipCameraButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        flipCameraButton.setTitleColor(.white, for: .normal)
+        flipCameraButton.layer.cornerRadius = 10
+        flipCameraButton.addTarget(self, action: #selector(onFlipCamera), for: .touchUpInside)
+        view.addSubview(flipCameraButton)
+
+        // Resolution button
+        resolutionButton.setTitle("Resolution", for: .normal)
+        resolutionButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        resolutionButton.setTitleColor(.white, for: .normal)
+        resolutionButton.layer.cornerRadius = 10
+        resolutionButton.addTarget(self, action: #selector(onSelectResolution), for: .touchUpInside)
+        view.addSubview(resolutionButton)
     }
 
     // MARK: - Actions
@@ -112,6 +165,26 @@ class CameraViewController: UIViewController {
                 self?.initializePoseLandmarkerServiceOnSessionResumption()
             }
         }
+    }
+
+    @objc private func onFlipCamera() {
+        cameraFeedService.switchCamera()
+    }
+
+    @objc private func onSelectResolution() {
+        let alert = UIAlertController(title: "Select Resolution", message: nil, preferredStyle: .actionSheet)
+        for (i, name) in presetNames.enumerated() {
+            alert.addAction(UIAlertAction(title: name, style: .default, handler: { [weak self] _ in
+                self?.setCameraResolution(self?.availablePresets[i])
+            }))
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+        present(alert, animated: true)
+    }
+
+    private func setCameraResolution(_ preset: AVCaptureSession.Preset?) {
+        guard let preset = preset else { return }
+        cameraFeedService.setSessionPreset(preset)
     }
 
     // MARK: - Pose Landmarker

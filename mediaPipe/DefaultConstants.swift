@@ -113,3 +113,7 @@ enum PoseLandmarkerDelegate: CaseIterable {
     }
   }
 }
+enum CameraPosition {
+    case front
+    case back
+}
